@@ -1,33 +1,35 @@
 <!DOCTYPE html>
 <html lang="fr">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chat en temps réel</title>
-    <link rel="stylesheet" href="/css/style.css" />
-  </head>
-  <body>
-    <!-- Conteneur pour le message de bienvenue et la connexion -->
-    <div id="auth-section">
-      <h2 id="welcome-message" style="display: none">
-        Bienvenue, <span id="username"></span>
-      </h2>
-      <button id="google-login-btn">Connexion avec Google</button>
-    </div>
-    <button id="logout-btn" style="display: none">Déconnexion</button>
-
-    <h2>Chat en temps réel</h2>
-    <div id="chat">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Chat en temps réel</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header>
+    <h2 id="welcome-message" style="margin:0;font-size:1.5rem;">
+      Bienvenue, <span id="username">Utilisateur</span>
+    </h2>
+    <button id="google-login-btn">Connexion Google</button>
+    <button id="logout-btn" style="display:none;">Déconnexion</button>
+  </header>
+  <main>
+    <aside>
+      <h3>Utilisateurs en ligne</h3>
+      <ul id="online-users"></ul>
+    </aside>
+    <div class="chat-container">
       <ul id="messages"></ul>
-      <form id="chat-form" action="">
-        <input id="message" autocomplete="off" placeholder="Écris un message..." />
+      <form id="chat-form">
+        <input id="message" autocomplete="off" placeholder="Écris un message...">
         <button type="submit">Envoyer</button>
       </form>
     </div>
-
-    <!-- Inclure Socket.io depuis le CDN -->
-    <script src="/socket.io/socket.io.js"></script>
-    <script type="module" src="/js/firebase.js"></script>
-    <script type="module" src="/js/chat.js"></script>
-  </body>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script type="module" src="/js/firebase.js"></script>
+  <script type="module" src="/js/chat.js"></script>
+</body>
 </html>

@@ -1,60 +1,85 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const admin = require('firebase-admin');
-const serviceAccount = require('./key.json');
-const path = require("path");
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import admin from 'firebase-admin';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import serviceAccount from './key.json' assert { type: 'json' };
 
-// Initialiser Firebase Admin
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL: 'https://real-time-chat-c14c1.firebaseio.com'
 });
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Connexion des utilisateurs
 io.on('connection', (socket) => {
-  console.log('Un utilisateur est connecté');
-
-  // Écouter les événements de message
-  socket.on('chatMessage', async (msg) => {
-    const { token, user, message } = msg;
-
-    if (token) {
-      try {
-        const decodedToken = await admin.auth().verifyIdToken(token);
-        const uid = decodedToken.uid;
-        const username = decodedToken.name || user;
-
-        io.emit('chatMessage', { user: username, message: message });
-      } catch (error) {
-        console.error('Erreur de vérification du token:', error.message);
-      }
-    } else {
-      io.emit('chatMessage', { user: user || 'Anonyme', message: message });
+  socket.on('userConnected', async (userData) => {
+    socket.userId = userData.userId;
+    const ref = admin.firestore().collection('onlineUsers').doc(userData.userId);
+    await ref.set({
+      displayName: userData.displayName,
+      status: 'online',
+      lastSeen: admin.firestore.FieldValue.serverTimestamp()
+    });
+    io.emit('updateUserStatus', {
+      userId: userData.userId,
+      displayName: userData.displayName,
+      status: 'online'
+    });
+  });
+  socket.on('userDisconnected', async () => {
+    if (socket.userId) {
+      const ref = admin.firestore().collection('onlineUsers').doc(socket.userId);
+      await ref.update({
+        status: 'offline',
+        lastSeen: admin.firestore.FieldValue.serverTimestamp()
+      });
+      io.emit('updateUserStatus', {
+        userId: socket.userId,
+        status: 'offline'
+      });
     }
   });
-
-  // Écouter les événements de saisie de texte
-  socket.on('typing', (data) => {
-    socket.broadcast.emit('typing', data); // Diffuser à tous les autres utilisateurs
-  });
-
-  socket.on('stopTyping', (data) => {
-    socket.broadcast.emit('stopTyping'); // Indiquer que l'utilisateur a cessé de taper
-  });
-
-  socket.on('disconnect', () => {
-    console.log('Un utilisateur s\'est déconnecté');
+  socket.on('disconnect', async () => {
+    if (socket.userId) {
+      const ref = admin.firestore().collection('onlineUsers').doc(socket.userId);
+      await ref.update({
+        status: 'offline',
+        lastSeen: admin.firestore.FieldValue.serverTimestamp()
+      });
+      io.emit('updateUserStatus', {
+        userId: socket.userId,
+        status: 'offline'
+      });
+    }
   });
 });
 
-// Démarrer le serveur
+setInterval(async () => {
+  const now = new Date();
+  const tenMinutesAgo = new Date(now.getTime() - 600000);
+  try {
+    const snap = await admin.firestore().collection('onlineUsers').where('status', '==', 'online').get();
+    snap.forEach(async (doc) => {
+      const data = doc.data();
+      const lastSeen = data.lastSeen ? data.lastSeen.toDate() : null;
+      if (!lastSeen || lastSeen < tenMinutesAgo) {
+        await doc.ref.update({ status: 'offline' });
+        io.emit('updateUserStatus', { userId: doc.id, status: 'offline' });
+      }
+    });
+  } catch (err) {
+    console.error(err);
+  }
+}, 3000);
+
 server.listen(3000, () => {
   console.log('Serveur démarré sur http://localhost:3000');
 });

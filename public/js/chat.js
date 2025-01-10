@@ -1,122 +1,137 @@
-import { db, auth, provider, signInWithPopup } from './firebase.js';
-import { collection, addDoc, query, orderBy, onSnapshot } from "https://www.gstatic.com/firebasejs/9.1.0/firebase-firestore.js";
+import { db, auth } from './firebase.js';
+import {
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged
+} from 'https://www.gstatic.com/firebasejs/9.1.0/firebase-auth.js';
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot
+} from 'https://www.gstatic.com/firebasejs/9.1.0/firebase-firestore.js';
 
 const socket = io();
+let userDisplayName = '';
 
-let isAnonymous = false;
-let userDisplayName = "";
-let typingTimeout;
-
-const typingIndicator = document.createElement("p");
-typingIndicator.setAttribute("id", "typing-indicator");
-typingIndicator.textContent = "";
-document.getElementById("chat").appendChild(typingIndicator);
-
-// Connexion via Google
 document.getElementById('google-login-btn').addEventListener('click', async () => {
+  const provider = new GoogleAuthProvider();
   try {
     const result = await signInWithPopup(auth, provider);
     userDisplayName = result.user.displayName;
-
-    // Mettre à jour l'interface après la connexion
+    socket.emit('userConnected', {
+      userId: result.user.uid,
+      displayName: userDisplayName
+    });
     updateUIAfterLogin(userDisplayName);
-    console.log("Connecté en tant que :", userDisplayName);
-  } catch (error) {
-    console.error("Erreur lors de la connexion Google:", error.message);
+  } catch (err) {
+    console.error(err);
   }
 });
 
-// Mise à jour de l'interface après connexion
-function updateUIAfterLogin(displayName) {
-  document.getElementById("username").textContent = displayName;
-  document.getElementById("welcome-message").style.display = "block";
-  document.getElementById("google-login-btn").style.display = "none";
-  document.getElementById("logout-btn").style.display = "block";
-}
-
-// Déconnexion
-document.getElementById("logout-btn").addEventListener("click", () => {
-  auth.signOut().then(() => {
-    console.log("Déconnecté");
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  try {
+    await signOut(auth);
+    socket.emit('userDisconnected');
+    userDisplayName = 'Anonyme';
     updateUIAfterLogout();
-  });
+  } catch (err) {
+    console.error(err);
+  }
 });
 
-function updateUIAfterLogout() {
-  document.getElementById("welcome-message").style.display = "none";
-  document.getElementById("google-login-btn").style.display = "block";
-  document.getElementById("logout-btn").style.display = "none";
-}
-
-// Gestion de l'indicateur "en train d'écrire"
-const messageInput = document.getElementById("message");
-messageInput.addEventListener("input", () => {
-  socket.emit("typing", { user: userDisplayName || "Anonyme" });
-
-  clearTimeout(typingTimeout);
-  typingTimeout = setTimeout(() => {
-    socket.emit("stopTyping", { user: userDisplayName || "Anonyme" });
-  }, 3000);
-});
-
-// Gestion de la soumission du formulaire
-document.getElementById("chat-form").addEventListener("submit", function (e) {
-  e.preventDefault();
-  sendMessage();
-});
-
-async function sendMessage() {
-  const message = document.getElementById("message").value;
-  let idToken = null;
-
-  if (!isAnonymous) {
-    const user = auth.currentUser;
-    if (user) {
-      idToken = await user.getIdToken();
-      userDisplayName = user.displayName || "Utilisateur Google";
+socket.on('updateUserStatus', (data) => {
+  const list = document.getElementById('online-users');
+  const existing = document.getElementById('user-' + data.userId);
+  if (data.status === 'online') {
+    if (!existing) {
+      const li = document.createElement('li');
+      li.id = 'user-' + data.userId;
+      li.textContent = (data.displayName || 'Anonyme') + ' est en ligne';
+      list.appendChild(li);
+    }
+  } else if (data.status === 'offline') {
+    if (existing) {
+      list.removeChild(existing);
     }
   }
+});
 
-  try {
-    const messagesRef = collection(db, "messages");
-    await addDoc(messagesRef, {
-      user: userDisplayName || "Anonyme",
-      message: message,
-      timestamp: new Date(),
-    });
-  } catch (error) {
-    console.error("Erreur lors de l'enregistrement dans Firestore :", error);
-  }
-
-  socket.emit("chatMessage", {
-    message,
-    token: idToken || null,
-    user: userDisplayName || "Anonyme",
-  });
-
-  document.getElementById("message").value = ""; // Vider le champ
+function updateUIAfterLogin(name) {
+  document.getElementById('username').textContent = name;
+  document.getElementById('welcome-message').style.display = 'block';
+  document.getElementById('google-login-btn').style.display = 'none';
+  document.getElementById('logout-btn').style.display = 'block';
 }
 
-// Récupérer les messages en temps réel
-const messagesRef = collection(db, "messages");
-const q = query(messagesRef, orderBy("timestamp"));
-onSnapshot(q, (snapshot) => {
-  const messages = document.getElementById("messages");
-  messages.innerHTML = ""; // Effacer les anciens messages
+function updateUIAfterLogout() {
+  document.getElementById('welcome-message').style.display = 'none';
+  document.getElementById('google-login-btn').style.display = 'block';
+  document.getElementById('logout-btn').style.display = 'none';
+  userDisplayName = 'Anonyme';
+}
 
-  snapshot.forEach((doc) => {
-    const messageData = doc.data();
-    const li = document.createElement("li");
-    li.textContent = `${messageData.user}: ${messageData.message}`;
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    userDisplayName = user.displayName || 'Utilisateur Google';
+    updateUIAfterLogin(userDisplayName);
+  } else {
+    updateUIAfterLogout();
+  }
+});
+
+document.getElementById('chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('message');
+  const msg = input.value.trim();
+  if (msg) {
+    try {
+      await addDoc(collection(db, 'messages'), {
+        user: userDisplayName || 'Anonyme',
+        message: msg,
+        timestamp: new Date()
+      });
+      input.value = '';
+    } catch (err) {
+      console.error(err);
+    }
+  }
+});
+
+const refMsg = collection(db, 'messages');
+const q = query(refMsg, orderBy('timestamp'));
+onSnapshot(q, (snap) => {
+  const messages = document.getElementById('messages');
+  messages.innerHTML = '';
+  snap.forEach((doc) => {
+    const d = doc.data();
+    const li = document.createElement('li');
+    li.classList.add('message-container');
+    if (d.user === userDisplayName) {
+      li.classList.add('user-message');
+    }
+    const bubble = document.createElement('div');
+    bubble.classList.add('message-bubble');
+    bubble.textContent = d.user + ': ' + d.message;
+    li.appendChild(bubble);
     messages.appendChild(li);
   });
 });
 
-// Écouter les événements de saisie de texte
-socket.on("typing", (data) => {
-  document.getElementById("typing-indicator").textContent = `${data.user} est en train d'écrire...`;
-});
-
-socket.on("stopTyping", () => {
-  document.getElementById("typing-indicator").textContent = "";
+const refUsers = collection(db, 'onlineUsers');
+const qUsers = query(refUsers);
+onSnapshot(qUsers, (snap) => {
+  const list = document.getElementById('online-users');
+  list.innerHTML = '';
+  snap.forEach((doc) => {
+    const data = doc.data();
+    if (data.status === 'online') {
+      const li = document.createElement('li');
+      li.id = 'user-' + doc.id;
+      li.textContent = (data.displayName || 'Anonyme') + ' est en ligne';
+      list.appendChild(li);
+    }
+  });
 });
